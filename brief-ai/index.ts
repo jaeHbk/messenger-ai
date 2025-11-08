@@ -135,7 +135,8 @@ async function main() {
         console.log(`[DEBUG] New group message received. 
             FromMe: ${message.isFromMe}. 
             Attachments: ${message.attachments ? message.attachments.length : 0}
-            Text: ${message.text}`);
+            Text: ${message.text}
+            ChatID: ${message.chatId}`);
 
         if (message.isFromMe) return; 
 
