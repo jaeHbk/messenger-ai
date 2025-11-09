@@ -1,12 +1,17 @@
 import asyncio
 import sys
 import json
+import os
 
 from dedalus_labs import AsyncDedalus, DedalusRunner
 from dedalus_labs.utils.stream import stream_async
 from dotenv import load_dotenv
+from calendar_agent import CalendarAgent
 
 load_dotenv()
+
+# Initialize calendar agent
+calendar_agent = CalendarAgent()
 
 # Persistent runners per chat ID
 runners = {}
@@ -126,10 +131,33 @@ async def main() -> None:
             sys.stdout.flush()
             
             if query:
+                # Check for dates/times and generate .ics file if detected
+                ics_file_path = None
+                calendar_message = ""
+                
+                try:
+                    ics_file_path = calendar_agent.process_text(query)
+                    if ics_file_path:
+                        # Get absolute path for the .ics file
+                        abs_path = os.path.abspath(ics_file_path)
+                        calendar_message = f"\n\n📅 Calendar event detected! I've created a calendar file: {abs_path}\nYou can import this .ics file into your calendar app."
+                        print(json.dumps({"status": "info", "message": f"Generated calendar file: {abs_path}"}))
+                        sys.stdout.flush()
+                except Exception as e:
+                    print(json.dumps({"status": "debug", "message": f"Calendar agent error: {str(e)}"}))
+                    sys.stdout.flush()
+                
                 print(json.dumps({"status": "info", "message": "Processing query..."}))
                 sys.stdout.flush()
                 result = await process_query(query, chat_id)
+                
+                # Append calendar message if .ics file was generated
+                if calendar_message:
+                    result = result + calendar_message
+                
                 response = {"status": "success", "result": result}
+                if ics_file_path:
+                    response["ics_file"] = os.path.abspath(ics_file_path)
             else:
                 response = {"status": "error", "error": "No query provided"}
             

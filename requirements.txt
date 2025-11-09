@@ -1,0 +1,5 @@
+dedalus-labs
+python-dotenv
+python-dateutil
+icalendar
+

@@ -37,3 +37,7 @@ pnpm-debug.log*
 # Editors & tooling
 .vscode/
 .idea/
+
+# Generated calendar files
+calendar_files/
+*.ics
