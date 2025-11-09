@@ -46,4 +46,4 @@ For heavy lifting, we spawn `dedalus_agent.py` inside a local virtual environmen
 
 ## Next Steps
 
-Adding more agents for more varsatile functionalities
+Adding more agents for more versatile functionalities

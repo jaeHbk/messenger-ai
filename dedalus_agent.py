@@ -7,11 +7,15 @@ from dedalus_labs import AsyncDedalus, DedalusRunner
 from dedalus_labs.utils.stream import stream_async
 from dotenv import load_dotenv
 from calendar_agent import CalendarAgent
+from travel_agent import TravelAgent
 
 load_dotenv()
 
 # Initialize calendar agent
 calendar_agent = CalendarAgent()
+
+# Initialize travel agent
+travel_agent = TravelAgent()
 
 # Persistent runners per chat ID
 runners = {}
@@ -49,7 +53,7 @@ def select_model(query: str) -> str:
     
     # Creative writing, long-form content - use Claude 3.5 Sonnet
     elif any(keyword in query_lower for keyword in ['write', 'create', 'story', 'essay', 'creative', 'draft']):
-        return "anthropic/claude-3-5-sonnet"
+        return "anthropic/claude-3-5-sonnet" 
     
     # Default to GPT-5-mini for general tasks (more accessible)
     else:
@@ -147,9 +151,21 @@ async def main() -> None:
                     print(json.dumps({"status": "debug", "message": f"Calendar agent error: {str(e)}"}))
                     sys.stdout.flush()
                 
+                # Check for travel-related conversations and enhance query if detected
+                enhanced_query = query
+                try:
+                    travel_info = travel_agent.process_text(query)
+                    if travel_info:
+                        enhanced_query = travel_info['enhanced_query']
+                        print(json.dumps({"status": "info", "message": f"Travel conversation detected. Location: {travel_info.get('location', 'N/A')}, Search type: {travel_info.get('search_type', 'N/A')}"}))
+                        sys.stdout.flush()
+                except Exception as e:
+                    print(json.dumps({"status": "debug", "message": f"Travel agent error: {str(e)}"}))
+                    sys.stdout.flush()
+                
                 print(json.dumps({"status": "info", "message": "Processing query..."}))
                 sys.stdout.flush()
-                result = await process_query(query, chat_id)
+                result = await process_query(enhanced_query, chat_id)
                 
                 # Append calendar message if .ics file was generated
                 if calendar_message:
@@ -168,7 +184,6 @@ async def main() -> None:
             error_response = {"status": "error", "error": str(e)}
             print(json.dumps(error_response))
             sys.stdout.flush()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
