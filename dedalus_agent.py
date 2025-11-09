@@ -8,16 +8,38 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Persistent runners per chat ID
+runners = {}
 
-async def process_query(query: str) -> str:
-    client = AsyncDedalus()
-    runner = DedalusRunner(client)
+async def get_or_create_runner(chat_id: str) -> DedalusRunner:
+    if chat_id not in runners:
+        print(json.dumps({"status": "debug", "message": f"Creating NEW runner for {chat_id}"}))
+        sys.stdout.flush()
+        client = AsyncDedalus()
+        runners[chat_id] = DedalusRunner(client)
+    else:
+        print(json.dumps({"status": "debug", "message": f"Using EXISTING runner for {chat_id}"}))
+        sys.stdout.flush()
+    return runners[chat_id]
+
+async def process_query(query: str, chat_id: str = "default") -> str:
+    runner = await get_or_create_runner(chat_id)
+    
+    # Debug: Show total active runners
+    print(json.dumps({"status": "debug", "message": f"Total active runners: {len(runners)}"}))
+    sys.stdout.flush()
+    
+    print(json.dumps({"status": "debug", "message": f"Query: {query[:100]}..."}))
+    sys.stdout.flush()
 
     response = await runner.run(
         input=query,
         model="openai/gpt-5-mini",
         mcp_servers=["windsor/exa-search-mcp"],
     )
+    
+    print(json.dumps({"status": "debug", "message": f"Response: {response.final_output[:100]}..."}))
+    sys.stdout.flush()
 
     return response.final_output
 
@@ -40,13 +62,14 @@ async def main() -> None:
             
             data = json.loads(line.strip())
             query = data.get('query', '')
-            print(json.dumps({"status": "info", "message": f"Parsed query: {query}"}))
+            chat_id = data.get('chat_id', 'default')
+            print(json.dumps({"status": "info", "message": f"Parsed query: {query}, chat_id: {chat_id}"}))
             sys.stdout.flush()
             
             if query:
                 print(json.dumps({"status": "info", "message": "Processing query..."}))
                 sys.stdout.flush()
-                result = await process_query(query)
+                result = await process_query(query, chat_id)
                 response = {"status": "success", "result": result}
             else:
                 response = {"status": "error", "error": "No query provided"}

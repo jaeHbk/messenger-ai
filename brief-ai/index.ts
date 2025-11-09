@@ -29,7 +29,7 @@ function stopDedalusAgent(): void {
   }
 }
 
-async function queryDedalusAgent(query: string): Promise<string> {
+async function queryDedalusAgent(query: string, chatId: string): Promise<string> {
   if (!dedalusAgent) {
     startDedalusAgent();
   }
@@ -77,12 +77,13 @@ async function queryDedalusAgent(query: string): Promise<string> {
 
     dedalusAgent!.stdout.on('data', onData);
     dedalusAgent!.stderr.on('data', onError);
-    dedalusAgent!.stdin.write(JSON.stringify({ query }) + '\n');
+    dedalusAgent!.stdin.write(JSON.stringify({ query, chat_id: chatId }) + '\n');
     console.log('[DEBUG] Query sent to Dedalus');
   });
 }
 
 async function answerQuestion(chatId: string, question: string): Promise<string> {
+  // Manual context management - needed since DedalusRunner doesn't persist conversation memory
   const conversationContext = getConversationContext(chatId);
   const fileContext = getKnowledgeBase(chatId);
 
@@ -98,7 +99,7 @@ async function answerQuestion(chatId: string, question: string): Promise<string>
     fullQuery = question;
   }
 
-  return await queryDedalusAgent(fullQuery);
+  return await queryDedalusAgent(fullQuery, chatId);
 }
 
 
@@ -114,13 +115,14 @@ async function handleFileLogic(sdk: IMessageSDK, message: Message, file: Attachm
     .execute();
 
   const { content } = await processAndStoreFile(message.chatId, file);
+  // Manual context management - needed since DedalusRunner doesn't persist conversation memory
   const conversationContext = getConversationContext(message.chatId);
 
   const analysisQuery = conversationContext
     ? `${conversationContext}\n\nAnalyze this file content from ${file.filename}:\n\n${content}`
     : `Analyze this file content from ${file.filename}:\n\n${content}`;
 
-  const analysis = await queryDedalusAgent(analysisQuery);
+  const analysis = await queryDedalusAgent(analysisQuery, message.chatId);
 
   await sdk.message(message)
     .replyText(analysis)
@@ -160,23 +162,34 @@ async function main() {
     // Set up message watchers
     await sdk.startWatching({
       onGroupMessage: async (message: Message) => {
+        console.log('1. Message received:', message.text);
+        console.log('2. Attachments:', message.attachments?.length || 0, message.attachments);
+        
         // ALWAYS store the message in history first (including bot's own responses)
         await addMessageToHistory(message.chatId, message);
 
         // Don't respond to our own messages
-        if (message.isFromMe) return;
+        if (message.isFromMe) {
+          console.log('3. Ignoring own message');
+          return;
+        }
 
         const text = message.text || '';
         const isTagged = text.toLowerCase().includes(BOT_NAME.toLowerCase());
         const hasFile = message.attachments && message.attachments.length > 0;
 
+        console.log('4. Tagged:', isTagged, '| Has file:', hasFile);
+
         // Only respond if tagged or has file
         if (hasFile) {
+          console.log('5. Processing file');
           await handleFileLogic(sdk, message, message.attachments[0]);
         } else if (isTagged) {
+          console.log('5. Processing tagged message');
           await handleTagLogic(sdk, message);
+        } else {
+          console.log('5. No action needed');
         }
-        // Note: we capture all messages for context, but only respond when appropriate
       },
       onError: (error) => {
         console.error('[ERROR]', error);

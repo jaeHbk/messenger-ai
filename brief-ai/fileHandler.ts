@@ -24,11 +24,15 @@ interface MessageHistoryEntry {
 const messageHistory = new Map<string, MessageHistoryEntry[]>();
 
 async function extractPdfText(filePath: string): Promise<string> {
+  console.log('5. Reading PDF file:', filePath);
   const dataBuffer = await fs.readFile(filePath);
+  console.log('6. PDF buffer size:', dataBuffer.length);
   const parser = new PDFParse({ data: dataBuffer });
 
   try {
+    console.log('7. Extracting PDF text...');
     const { text } = await parser.getText();
+    console.log('8. PDF text extracted, length:', text.length);
     return text;
   } finally {
     try {
