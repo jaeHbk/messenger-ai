@@ -1,91 +1,104 @@
-// --- Save this as index.ts ---
-
 import { IMessageSDK, type Message, type Attachment } from '@photon-ai/imessage-kit';
-import * as fs from 'fs';
-import * as path from 'path';
-import pdf = require('pdf-parse');
+import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import { processAndStoreFile, getKnowledgeBase } from './fileHandler';
 
-// --- Bot Configuration ---
 const BOT_NAME = '@Brief-AI';
 
-/**
- * This is our "AI's memory". It's just a simple map.
- * We'll store "mock" knowledge based on the filename.
- */
-const knowledgeBase = new Map<string, string>();
+let dedalusAgent: ChildProcessWithoutNullStreams | null = null;
 
-// --- "AI" FUNCTIONS (100% LOCAL MOCKS) ---
+// Starts the agent
+function startDedalusAgent(): void {
+  console.log('[DEBUG] Starting Dedalus agent...');
+  if (dedalusAgent) {
+    console.log('[DEBUG] Dedalus agent already running');
+    return;
+  }
+  
+  console.log('[DEBUG] Spawning Python process...');
+  dedalusAgent = spawn('/Users/johnkim/projects/messenger-ai/venv/bin/python', ['/Users/johnkim/projects/messenger-ai/dedalus_agent.py'], {
+    cwd: __dirname,
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  console.log('[DEBUG] Dedalus agent spawned successfully');
+}
 
-/**
- * MOCK AI (Summarizer):
- * "Pretends" to read ANY file and generates a mock summary.
- */
-async function processAndStoreFile(chatId: string, file: Attachment): Promise<{summary: string, content: string}> {
-  console.log(`[INFO] Processing file: ${file.filename}`);
-  let extractedText = '';
-
-  // The Attachment object from imessage-kit should have a 'path' property
-  // If it's named differently (e.g., 'filePath'), adjust this line.
-  const filePath = file.path; // <-- This is the key!
-
-  try {
-    const fileExtension = path.extname(file.filename).toLowerCase();
-
-    if (fileExtension === '.pdf') {
-      const dataBuffer = fs.readFileSync(filePath);
-      const data = await (pdf as any)(dataBuffer);
-      extractedText = data.text;
-    } else if (fileExtension === '.txt' || fileExtension === '.md') {
-      extractedText = fs.readFileSync(filePath, 'utf8');
-    } else {
-      // For other files (images, etc.), we can't extract text yet.
-      const unsupportedMsg = `[INFO] File type '${fileExtension}' not supported for text extraction. Storing filename only.`;
-      console.log(unsupportedMsg);
-      extractedText = `[File: ${file.filename}]`;
-    }
-
-    // 2. Add this extracted text to our local base
-    const currentKnowledge = knowledgeBase.get(chatId) || '';
-    const newKnowledge = currentKnowledge + `\n\n--- Content from ${file.filename} ---\n${extractedText}\n--- End of Content ---`;
-    knowledgeBase.set(chatId, newKnowledge);
-
-    // 3. Return a mock summary (for now) and the content
-    const summary = `Successfully read and stored the content from "${file.filename}".`;
-    return { summary, content: extractedText };
-
-  } catch (error) {
-    console.error(`[ERROR] Failed to read file ${file.filename}:`, error);
-    return { summary: `Sorry, I failed to read the content of "${file.filename}".`, content: '' };
+function stopDedalusAgent(): void {
+  if (dedalusAgent) {
+    dedalusAgent.kill();
+    dedalusAgent = null;
   }
 }
 
-/**
- * MOCK AI (Q&A):
- * "Pretends" to answer a question using the mock knowledge base.
- */
+async function queryDedalusAgent(query: string): Promise<string> {
+  if (!dedalusAgent) {
+    startDedalusAgent();
+  }
+
+  console.log('[DEBUG] Sending query to Dedalus:', query);
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      console.log('[DEBUG] Dedalus agent timeout after 120s');
+      reject(new Error('Dedalus agent timeout'));
+    }, 120000);
+
+    const onData = (data: Buffer) => {
+      const chunk = data.toString();
+      console.log('[DEBUG] Received from Dedalus:', chunk);
+      
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const response = JSON.parse(line.trim());
+            console.log('[DEBUG] Parsed response:', response);
+            
+            if (response.status === 'success') {
+              clearTimeout(timeout);
+              dedalusAgent!.stdout.off('data', onData);
+              resolve(response.result || response.received);
+              return;
+            } else if (response.status === 'error') {
+              clearTimeout(timeout);
+              dedalusAgent!.stdout.off('data', onData);
+              reject(new Error(response.error));
+              return;
+            }
+          } catch (e) {
+            console.log('[DEBUG] Non-JSON line ignored:', line.trim());
+          }
+        }
+      }
+    };
+
+    const onError = (error: Buffer) => {
+      console.log('[DEBUG] Dedalus stderr:', error.toString());
+    };
+
+    dedalusAgent!.stdout.on('data', onData);
+    dedalusAgent!.stderr.on('data', onError);
+    dedalusAgent!.stdin.write(JSON.stringify({ query }) + '\n');
+    console.log('[DEBUG] Query sent to Dedalus');
+  });
+}
+
 async function answerQuestion(chatId: string, question: string): Promise<string> {
-  const context = knowledgeBase.get(chatId);
-
-  if (!context) {
-    return "I don't have any knowledge for this chat yet. Please upload a file, and I'll read it.";
-  }
+  const context = getKnowledgeBase(chatId);
   
-  // --- MOCK AI RESPONSE ---
-  // We'll just check if a keyword from the question is in our "mock" context
-  const questionWords = question.toLowerCase().split(' ');
-  const foundWord = questionWords.find(word => context.toLowerCase().includes(word));
-
-  let answer = '';
-  if (foundWord) {
-    answer = `[Mock AI]: I found information related to "${foundWord}" in my knowledge base.`;
+  if (context) {
+    const queryWithContext = `Context: ${context}\n\nQuestion: ${question}`;
+    try {
+      return await queryDedalusAgent(queryWithContext);
+    } catch (error) {
+      return `Error processing question: ${error}`;
+    }
   } else {
-    answer = `[Mock AI]: I couldn't find an answer to "${question}" in the files I've read.`;
+    try {
+      return await queryDedalusAgent(question);
+    } catch (error) {
+      return `Error processing question: ${error}`;
+    }
   }
-
-  // We add a small delay to make it feel like a real AI
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  return answer;
 }
 
 
@@ -96,40 +109,27 @@ async function answerQuestion(chatId: string, question: string): Promise<string>
  * This handler now works for ANY file type.
  */
 async function handleFileLogic(sdk: IMessageSDK, message: Message, file: Attachment) {
-  console.log(`[INFO] File detected in chat ${message.chatId}: ${file.filename}`);
-  
-  // **THIS IS THE FIX**: We removed the ".pdf" check.
-  // This code block will now run for ANY file.
-  
-  // 1. Acknowledge
   await sdk.message(message)
-    .replyText(`Thanks! I'm 'reading' "${file.filename}" now...`)
+    .replyText(`Analyzing "${file.filename}"...`)
     .execute();
 
-  // 2. "Read" and "summarize" (using our new mock function)
   const { summary, content } = await processAndStoreFile(message.chatId, file);
+  
+  // Send file content to Dedalus for analysis
+  const analysis = await queryDedalusAgent(`Analyze this file content from ${file.filename}. Be concise and highlight only key points.\n\n${content}`);
 
-  // 3. Post the summary
   await sdk.message(message)
-    .replyText(summary)
-    .execute();
-    
-  await sdk.message(message)
-    .replyText('I have added this file to my knowledge base. Feel free to tag me (@Brief-AI) to ask questions about it.')
+    .replyText(analysis)
     .execute();
 }
 
-/**
- * HANDLER 2: Reactive Q&A (No changes needed)
- */
+// I believe this handles no text?
 async function handleTagLogic(sdk: IMessageSDK, message: Message) {
   const text = message.text || '';
-  
-  console.log(`[INFO] Bot was tagged in chat: ${message.chatId}`);
   const question = text.replace(new RegExp(BOT_NAME, 'i'), '').trim();
   
   await sdk.message(message)
-    .replyText(`Got it. Searching my knowledge base for: "${question}"...`)
+    .replyText(`Processing: "${question}"...`)
     .execute();
 
   const answer = await answerQuestion(message.chatId, question);
@@ -140,24 +140,22 @@ async function handleTagLogic(sdk: IMessageSDK, message: Message) {
 }
 
 
-// --- Main Bot Startup Function (No changes needed) ---
+// --- Main Bot Startup ---
 async function main() {
   try {
+    console.log('[INFO] Brief-AI starting with Dedalus integration...');
+    
+    // Initialize iMessage SDK
     const sdk = new IMessageSDK({
       watcher: { unreadOnly: false }
     });
 
-    console.log('[INFO] Brief-AI (The AI Dropbox) is starting...');
-    console.log('[INFO] Grant Full Disk Access to your terminal.');
+    // Start Dedalus agent
+    startDedalusAgent();
 
+    // Set up message watchers
     await sdk.startWatching({
       onGroupMessage: async (message: Message) => {
-        console.log(`[DEBUG] New group message received. 
-            FromMe: ${message.isFromMe}. 
-            Attachments: ${message.attachments ? message.attachments.length : 0}
-            Text: ${message.text}
-            ChatID: ${message.chatId}`);
-
         if (message.isFromMe) return; 
 
         const text = message.text || '';
@@ -165,23 +163,25 @@ async function main() {
         const hasFile = message.attachments && message.attachments.length > 0;
 
         if (hasFile) {
-          const filename = message.attachments[0].filename;
-          console.log(`[DEBUG] Message has a file: ${filename}`);
           await handleFileLogic(sdk, message, message.attachments[0]);
         } else if (isTagged) {
-          console.log(`[DEBUG] Message has a tag: ${text}`);
           await handleTagLogic(sdk, message);
         }
       },
       onError: (error) => {
-        console.error('[ERROR] Watcher failed on a message:', error);
+        console.error('[ERROR]', error);
       }
     });
 
-    console.log('[INFO] Watcher is running. Waiting for file uploads or tags...');
+    console.log('[INFO] Watching for messages...');
+
+    // Cleanup on exit
+    process.on('SIGTERM', stopDedalusAgent);
+    process.on('SIGINT', stopDedalusAgent);
 
   } catch (error) {
-    console.error('[ERROR] Failed to initialize SDK:', error);
+    console.error('[ERROR]', error);
+    stopDedalusAgent();
     process.exit(1);
   }
 }
