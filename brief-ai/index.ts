@@ -1,6 +1,6 @@
 import { IMessageSDK, type Message, type Attachment } from '@photon-ai/imessage-kit';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
-import { processAndStoreFile, getKnowledgeBase } from './fileHandler';
+import { processAndStoreFile, getConversationContext, addMessageToHistory, getKnowledgeBase } from './fileHandler';
 
 const BOT_NAME = '@Brief-AI';
 
@@ -83,22 +83,22 @@ async function queryDedalusAgent(query: string): Promise<string> {
 }
 
 async function answerQuestion(chatId: string, question: string): Promise<string> {
-  const context = getKnowledgeBase(chatId);
-  
-  if (context) {
-    const queryWithContext = `Context: ${context}\n\nQuestion: ${question}`;
-    try {
-      return await queryDedalusAgent(queryWithContext);
-    } catch (error) {
-      return `Error processing question: ${error}`;
-    }
+  const conversationContext = getConversationContext(chatId);
+  const fileContext = getKnowledgeBase(chatId);
+
+  let fullQuery = '';
+
+  if (conversationContext && fileContext) {
+    fullQuery = `${conversationContext}\n\nFile contents:\n${fileContext}\n\nCurrent question: ${question}`;
+  } else if (conversationContext) {
+    fullQuery = `${conversationContext}\n\nCurrent question: ${question}`;
+  } else if (fileContext) {
+    fullQuery = `File contents:\n${fileContext}\n\nQuestion: ${question}`;
   } else {
-    try {
-      return await queryDedalusAgent(question);
-    } catch (error) {
-      return `Error processing question: ${error}`;
-    }
+    fullQuery = question;
   }
+
+  return await queryDedalusAgent(fullQuery);
 }
 
 
@@ -113,10 +113,14 @@ async function handleFileLogic(sdk: IMessageSDK, message: Message, file: Attachm
     .replyText(`Analyzing "${file.filename}"...`)
     .execute();
 
-  const { summary, content } = await processAndStoreFile(message.chatId, file);
-  
-  // Send file content to Dedalus for analysis
-  const analysis = await queryDedalusAgent(`Analyze this file content from ${file.filename}. Be concise and highlight only key points.\n\n${content}`);
+  const { content } = await processAndStoreFile(message.chatId, file);
+  const conversationContext = getConversationContext(message.chatId);
+
+  const analysisQuery = conversationContext
+    ? `${conversationContext}\n\nAnalyze this file content from ${file.filename}:\n\n${content}`
+    : `Analyze this file content from ${file.filename}:\n\n${content}`;
+
+  const analysis = await queryDedalusAgent(analysisQuery);
 
   await sdk.message(message)
     .replyText(analysis)
@@ -156,17 +160,23 @@ async function main() {
     // Set up message watchers
     await sdk.startWatching({
       onGroupMessage: async (message: Message) => {
-        if (message.isFromMe) return; 
+        // ALWAYS store the message in history first (including bot's own responses)
+        await addMessageToHistory(message.chatId, message);
+
+        // Don't respond to our own messages
+        if (message.isFromMe) return;
 
         const text = message.text || '';
         const isTagged = text.toLowerCase().includes(BOT_NAME.toLowerCase());
         const hasFile = message.attachments && message.attachments.length > 0;
 
+        // Only respond if tagged or has file
         if (hasFile) {
           await handleFileLogic(sdk, message, message.attachments[0]);
         } else if (isTagged) {
           await handleTagLogic(sdk, message);
         }
+        // Note: we capture all messages for context, but only respond when appropriate
       },
       onError: (error) => {
         console.error('[ERROR]', error);
