@@ -3,6 +3,7 @@
 import { IMessageSDK, type Message, type Attachment } from '@photon-ai/imessage-kit';
 import * as fs from 'fs';
 import * as path from 'path';
+import pdf = require('pdf-parse');
 
 // --- Bot Configuration ---
 const BOT_NAME = '@Brief-AI';
@@ -19,24 +20,43 @@ const knowledgeBase = new Map<string, string>();
  * MOCK AI (Summarizer):
  * "Pretends" to read ANY file and generates a mock summary.
  */
-async function summarizeAndStore(chatId: string, file: Attachment): Promise<string> {
-  // This function is now guaranteed to work for ANY file.
-  
-  // 1. "Understand" the file by its name
-  const fileInfo = `[Mock Knowledge] I have stored the file: '${file.filename}'`;
-  
-  // 2. Add this "knowledge" to our local base
-  const currentKnowledge = knowledgeBase.get(chatId) || '';
-  const newKnowledge = currentKnowledge + '\n' + fileInfo;
-  knowledgeBase.set(chatId, newKnowledge);
+async function processAndStoreFile(chatId: string, file: Attachment): Promise<{summary: string, content: string}> {
+  console.log(`[INFO] Processing file: ${file.filename}`);
+  let extractedText = '';
 
-  // 3. Return a "mock summary"
-  const summary = `This is a mock summary for "${file.filename}". I have successfully 'read' it and added it to my knowledge base.`;
-  
-  // We add a small delay to make it feel like a real AI
-  await new Promise(resolve => setTimeout(resolve, 1500)); 
+  // The Attachment object from imessage-kit should have a 'path' property
+  // If it's named differently (e.g., 'filePath'), adjust this line.
+  const filePath = file.path; // <-- This is the key!
 
-  return summary;
+  try {
+    const fileExtension = path.extname(file.filename).toLowerCase();
+
+    if (fileExtension === '.pdf') {
+      const dataBuffer = fs.readFileSync(filePath);
+      const data = await (pdf as any)(dataBuffer);
+      extractedText = data.text;
+    } else if (fileExtension === '.txt' || fileExtension === '.md') {
+      extractedText = fs.readFileSync(filePath, 'utf8');
+    } else {
+      // For other files (images, etc.), we can't extract text yet.
+      const unsupportedMsg = `[INFO] File type '${fileExtension}' not supported for text extraction. Storing filename only.`;
+      console.log(unsupportedMsg);
+      extractedText = `[File: ${file.filename}]`;
+    }
+
+    // 2. Add this extracted text to our local base
+    const currentKnowledge = knowledgeBase.get(chatId) || '';
+    const newKnowledge = currentKnowledge + `\n\n--- Content from ${file.filename} ---\n${extractedText}\n--- End of Content ---`;
+    knowledgeBase.set(chatId, newKnowledge);
+
+    // 3. Return a mock summary (for now) and the content
+    const summary = `Successfully read and stored the content from "${file.filename}".`;
+    return { summary, content: extractedText };
+
+  } catch (error) {
+    console.error(`[ERROR] Failed to read file ${file.filename}:`, error);
+    return { summary: `Sorry, I failed to read the content of "${file.filename}".`, content: '' };
+  }
 }
 
 /**
@@ -87,7 +107,7 @@ async function handleFileLogic(sdk: IMessageSDK, message: Message, file: Attachm
     .execute();
 
   // 2. "Read" and "summarize" (using our new mock function)
-  const summary = await summarizeAndStore(message.chatId, file);
+  const { summary, content } = await processAndStoreFile(message.chatId, file);
 
   // 3. Post the summary
   await sdk.message(message)
