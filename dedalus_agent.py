@@ -22,6 +22,34 @@ async def get_or_create_runner(chat_id: str) -> DedalusRunner:
         sys.stdout.flush()
     return runners[chat_id]
 
+def select_model(query: str) -> str:
+    """Select the best model based on the query type"""
+    query_lower = query.lower()
+    
+    # Image generation tasks - use DALL-E 3
+    if any(keyword in query_lower for keyword in ['create image', 'generate image', 'draw', 'make picture', 'create picture', 'generate picture', 'paint', 'illustrate', 'design image']):
+        return "openai/dall-e-3"
+    
+    # Vision/image analysis tasks - use GPT-4o
+    elif any(keyword in query_lower for keyword in ['analyze image', 'describe image', 'read image', 'analyze this file content from', '.jpg', '.png', '.gif', 'what\'s in this image', 'data:image']):
+        return "openai/gpt-4o"
+    
+    # Complex reasoning, coding, analysis - use GPT-5
+    elif any(keyword in query_lower for keyword in ['analyze', 'code', 'debug', 'complex', 'reasoning', 'logic', 'algorithm']):
+        return "openai/gpt-5"
+    
+    # Fast responses, simple tasks - use GPT-5-mini
+    elif any(keyword in query_lower for keyword in ['quick', 'simple', 'summarize', 'brief', 'short']):
+        return "openai/gpt-5-mini"
+    
+    # Creative writing, long-form content - use Claude 3.5 Sonnet
+    elif any(keyword in query_lower for keyword in ['write', 'create', 'story', 'essay', 'creative', 'draft']):
+        return "anthropic/claude-3-5-sonnet"
+    
+    # Default to GPT-5 for general tasks
+    else:
+        return "openai/gpt-5"
+
 async def process_query(query: str, chat_id: str = "default") -> str:
     runner = await get_or_create_runner(chat_id)
     
@@ -29,19 +57,50 @@ async def process_query(query: str, chat_id: str = "default") -> str:
     print(json.dumps({"status": "debug", "message": f"Total active runners: {len(runners)}"}))
     sys.stdout.flush()
     
+    # Select optimal model for this query
+    selected_model = select_model(query)
+    print(json.dumps({"status": "debug", "message": f"Selected model: {selected_model}"}))
+    sys.stdout.flush()
+    
     print(json.dumps({"status": "debug", "message": f"Query: {query[:100]}..."}))
     sys.stdout.flush()
 
     response = await runner.run(
         input=query,
-        model="openai/gpt-5-mini",
-        mcp_servers=["windsor/exa-search-mcp"],
+        model=selected_model,
+        mcp_servers=[
+            "windsor/exa-search-mcp",           # Enhanced web search
+            "google/google-docs-mcp",           # Google Docs editing
+            "google/google-drive-mcp",          # Google Drive access
+            "brightdata/web-research-mcp",      # Advanced web scraping
+        ],
     )
     
-    print(json.dumps({"status": "debug", "message": f"Response: {response.final_output[:100]}..."}))
+    # Handle different response types
+    final_response = response.final_output
+    
+    # Check if this was an image generation request
+    if selected_model == "openai/dall-e-3":
+        print(json.dumps({"status": "debug", "message": f"DALL-E Response type: {type(final_response)}"}))
+        sys.stdout.flush()
+        
+        # DALL-E responses might contain image URLs or be structured differently
+        if isinstance(final_response, str):
+            # If it's a URL, format it nicely
+            if final_response.startswith('http') and ('image' in final_response or 'dalle' in final_response):
+                final_response = f"🎨 Here's your generated image:\n{final_response}\n\nImage created with DALL-E 3"
+            # If it contains a URL within text, extract and format it
+            elif 'http' in final_response:
+                import re
+                urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', final_response)
+                if urls:
+                    image_url = urls[0]
+                    final_response = f"🎨 Here's your generated image:\n{image_url}\n\nImage created with DALL-E 3"
+    
+    print(json.dumps({"status": "debug", "message": f"Final response: {final_response[:100]}..."}))
     sys.stdout.flush()
 
-    return response.final_output
+    return final_response
 
 
 async def main() -> None:

@@ -83,23 +83,39 @@ async function queryDedalusAgent(query: string, chatId: string): Promise<string>
 }
 
 async function answerQuestion(chatId: string, question: string): Promise<string> {
-  // Manual context management - needed since DedalusRunner doesn't persist conversation memory
-  const conversationContext = getConversationContext(chatId);
-  const fileContext = getKnowledgeBase(chatId);
-
-  let fullQuery = '';
-
-  if (conversationContext && fileContext) {
-    fullQuery = `${conversationContext}\n\nFile contents:\n${fileContext}\n\nCurrent question: ${question}`;
-  } else if (conversationContext) {
-    fullQuery = `${conversationContext}\n\nCurrent question: ${question}`;
-  } else if (fileContext) {
-    fullQuery = `File contents:\n${fileContext}\n\nQuestion: ${question}`;
+  // Smart context management - reduce context for large content and image tasks
+  const questionLower = question.toLowerCase();
+  const isImageAnalysis = questionLower.includes('analyze image') || question.includes('data:image') || questionLower.includes('describe image');
+  const isImageGeneration = questionLower.includes('create image') || questionLower.includes('generate image') || questionLower.includes('draw') || questionLower.includes('make picture');
+  
+  if (isImageAnalysis) {
+    // For image analysis, use minimal context to avoid token limits
+    const conversationContext = getConversationContext(chatId);
+    const recentContext = conversationContext ? conversationContext.split('\n').slice(-5).join('\n') : '';
+    const fullQuery = recentContext ? `${recentContext}\n\nCurrent question: ${question}` : question;
+    return await queryDedalusAgent(fullQuery, chatId);
+  } else if (isImageGeneration) {
+    // For image generation, use minimal context - DALL-E doesn't need conversation history
+    return await queryDedalusAgent(question, chatId);
   } else {
-    fullQuery = question;
-  }
+    // Normal context management for non-image queries
+    const conversationContext = getConversationContext(chatId);
+    const fileContext = getKnowledgeBase(chatId);
 
-  return await queryDedalusAgent(fullQuery, chatId);
+    let fullQuery = '';
+
+    if (conversationContext && fileContext) {
+      fullQuery = `${conversationContext}\n\nFile contents:\n${fileContext}\n\nCurrent question: ${question}`;
+    } else if (conversationContext) {
+      fullQuery = `${conversationContext}\n\nCurrent question: ${question}`;
+    } else if (fileContext) {
+      fullQuery = `File contents:\n${fileContext}\n\nQuestion: ${question}`;
+    } else {
+      fullQuery = question;
+    }
+
+    return await queryDedalusAgent(fullQuery, chatId);
+  }
 }
 
 
@@ -114,19 +130,40 @@ async function handleFileLogic(sdk: IMessageSDK, message: Message, file: Attachm
     .replyText(`Analyzing "${file.filename}"...`)
     .execute();
 
-  const { content } = await processAndStoreFile(message.chatId, file);
-  // Manual context management - needed since DedalusRunner doesn't persist conversation memory
-  const conversationContext = getConversationContext(message.chatId);
+  const { content, success, fileType } = await processAndStoreFile(message.chatId, file);
+  
+  if (!success) {
+    // If file processing failed, send error message
+    await sdk.message(message)
+      .replyText(content) // content contains error message
+      .execute();
+    return;
+  }
 
-  const analysisQuery = conversationContext
-    ? `${conversationContext}\n\nAnalyze this file content from ${file.filename}:\n\n${content}`
-    : `Analyze this file content from ${file.filename}:\n\n${content}`;
+  // Smart context management based on file type
+  const isImageFile = fileType === 'Image';
+  
+  if (isImageFile) {
+    // For images, use minimal context to avoid token limits
+    const analysisQuery = `Analyze this image file ${file.filename}:\n\n${content}`;
+    const analysis = await queryDedalusAgent(analysisQuery, message.chatId);
+    
+    await sdk.message(message)
+      .replyText(analysis)
+      .execute();
+  } else {
+    // For other files, use full context
+    const conversationContext = getConversationContext(message.chatId);
+    const analysisQuery = conversationContext
+      ? `${conversationContext}\n\nAnalyze this file content from ${file.filename}:\n\n${content}`
+      : `Analyze this file content from ${file.filename}:\n\n${content}`;
 
-  const analysis = await queryDedalusAgent(analysisQuery, message.chatId);
-
-  await sdk.message(message)
-    .replyText(analysis)
-    .execute();
+    const analysis = await queryDedalusAgent(analysisQuery, message.chatId);
+    
+    await sdk.message(message)
+      .replyText(analysis)
+      .execute();
+  }
 }
 
 // I believe this handles no text?
