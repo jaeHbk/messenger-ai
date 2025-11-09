@@ -1,5 +1,6 @@
 import { IMessageSDK, type Message, type Attachment } from '@photon-ai/imessage-kit';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import { join } from 'path';
 import { processAndStoreFile, getConversationContext, addMessageToHistory, getKnowledgeBase } from './fileHandler';
 
 const BOT_NAME = '@Brief-AI';
@@ -14,9 +15,17 @@ function startDedalusAgent(): void {
     return;
   }
   
+  // Get project root (parent of brief-ai directory)
+  const projectRoot = join(__dirname, '..');
+  const pythonPath = join(projectRoot, 'venv', 'bin', 'python');
+  const agentScriptPath = join(projectRoot, 'dedalus_agent.py');
+  
   console.log('[DEBUG] Spawning Python process...');
-  dedalusAgent = spawn('/Users/johnkim/projects/messenger-ai/venv/bin/python', ['/Users/johnkim/projects/messenger-ai/dedalus_agent.py'], {
-    cwd: __dirname,
+  console.log('[DEBUG] Python path:', pythonPath);
+  console.log('[DEBUG] Agent script:', agentScriptPath);
+  
+  dedalusAgent = spawn(pythonPath, [agentScriptPath], {
+    cwd: projectRoot,
     stdio: ['pipe', 'pipe', 'pipe']
   });
   console.log('[DEBUG] Dedalus agent spawned successfully');
