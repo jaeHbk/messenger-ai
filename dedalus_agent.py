@@ -26,12 +26,12 @@ def select_model(query: str) -> str:
     """Select the best model based on the query type"""
     query_lower = query.lower()
     
-    # Image generation tasks - use DALL-E 3
-    if any(keyword in query_lower for keyword in ['create image', 'generate image', 'draw', 'make picture', 'create picture', 'generate picture', 'paint', 'illustrate', 'design image']):
-        return "openai/dall-e-3"
+    # Image generation tasks - disabled DALL-E 3, use GPT-4o mini instead
+    # if any(keyword in query_lower for keyword in ['create image', 'generate image', 'draw', 'make picture', 'create picture', 'generate picture', 'paint', 'illustrate', 'design image']):
+    #     return "openai/dall-e-3"
     
     # Vision/image analysis tasks - use GPT-4o
-    elif any(keyword in query_lower for keyword in ['analyze image', 'describe image', 'read image', 'analyze this file content from', '.jpg', '.png', '.gif', 'what\'s in this image', 'data:image']):
+    if any(keyword in query_lower for keyword in ['analyze image', 'describe image', 'read image', 'analyze this file content from', '.jpg', '.png', '.gif', 'what\'s in this image', 'data:image']):
         return "openai/gpt-4o"
     
     # Complex reasoning, coding, analysis - use GPT-5
@@ -46,9 +46,9 @@ def select_model(query: str) -> str:
     elif any(keyword in query_lower for keyword in ['write', 'create', 'story', 'essay', 'creative', 'draft']):
         return "anthropic/claude-3-5-sonnet"
     
-    # Default to GPT-5 for general tasks
+    # Default to GPT-5-mini for general tasks (more accessible)
     else:
-        return "openai/gpt-5"
+        return "openai/gpt-5-mini"
 
 async def process_query(query: str, chat_id: str = "default") -> str:
     runner = await get_or_create_runner(chat_id)
