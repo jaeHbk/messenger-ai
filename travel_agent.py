@@ -16,7 +16,7 @@ class TravelAgent:
         self.travel_keywords = [
             'travel', 'trip', 'vacation', 'visit', 'going to', 'planning to visit',
             'traveling to', 'visiting', 'travelling', 'holiday', 'journey',
-            'destination', 'going', 'flying to', 'driving to', 'heading to'
+            'destination', 'flying to', 'driving to', 'heading to'
         ]
         
         # Accommodation keywords
