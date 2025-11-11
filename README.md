@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://github.com/jaeHbk/messenger-ai/blob/main/images/messenger_ai_logo.png", width="300"/>
+</p>
+
 # Messenger-AI
 HackPrinceton 2026 
 
