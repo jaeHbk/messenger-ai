@@ -345,5 +345,6 @@ class CalendarAgent:
         # Generate .ics file
         ics_path = self.generate_ics_file(event_info)
         
+        # command looks like this:
         return ics_path
 
