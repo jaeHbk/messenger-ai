@@ -97,7 +97,7 @@ async def process_query(query: str, chat_id: str = "default") -> str:
         if isinstance(final_response, str):
             # If it's a URL, format it nicely
             if final_response.startswith('http') and ('image' in final_response or 'dalle' in final_response):
-                final_response = f"🎨 Here's your generated image:\n{final_response}\n\nImage created with DALL-E 3"
+                final_response = f"Here's your generated image:\n{final_response}\n\nImage created with DALL-E 3"
             # If it contains a URL within text, extract and format it
             elif 'http' in final_response:
                 import re

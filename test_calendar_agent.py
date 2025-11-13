@@ -32,11 +32,11 @@ def test_calendar_agent():
             # Test parsing and generation
             ics_path = agent.process_text(test_text)
             if ics_path:
-                print(f"✅ Generated .ics file: {ics_path}")
+                print(f" Generated .ics file: {ics_path}")
             else:
-                print("❌ Failed to generate .ics file")
+                print("Failed to generate .ics file")
         else:
-            print("ℹ️  No dates detected (expected for some test cases)")
+            print("No dates detected (expected for some test cases)")
 
 if __name__ == "__main__":
     test_calendar_agent()
