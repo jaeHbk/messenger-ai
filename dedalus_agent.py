@@ -104,7 +104,7 @@ async def process_query(query: str, chat_id: str = "default") -> str:
                 urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', final_response)
                 if urls:
                     image_url = urls[0]
-                    final_response = f"🎨 Here's your generated image:\n{image_url}\n\nImage created with DALL-E 3"
+                    final_response = f"Here's your generated image:\n{image_url}\n\nImage created with DALL-E 3"
     
     print(json.dumps({"status": "debug", "message": f"Final response: {final_response[:100]}..."}))
     sys.stdout.flush()
@@ -144,7 +144,7 @@ async def main() -> None:
                     if ics_file_path:
                         # Get absolute path for the .ics file
                         abs_path = os.path.abspath(ics_file_path)
-                        calendar_message = f"\n\n📅 Calendar event detected! I've created a calendar file: {abs_path}\nYou can import this .ics file into your calendar app."
+                        calendar_message = f"\n\nCalendar event detected! I've created a calendar file: {abs_path}\nYou can import this .ics file into your calendar app."
                         print(json.dumps({"status": "info", "message": f"Generated calendar file: {abs_path}"}))
                         sys.stdout.flush()
                 except Exception as e:
